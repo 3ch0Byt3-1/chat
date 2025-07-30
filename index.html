@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CyberChat</title>
+  <title>CyberChat Advanced</title>
   <style>
     :root {
       --primary: #00ffcc;
@@ -65,21 +65,19 @@
       text-shadow: var(--glow);
     }
 
-    .theme-switcher {
-      background: var(--bg-light);
-      border: 1px solid var(--primary);
-      color: var(--primary);
-      padding: 8px 15px;
-      border-radius: 20px;
-      cursor: pointer;
-      transition: all 0.3s;
-      font-weight: bold;
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      font-size: 0.9rem;
     }
 
-    .theme-switcher:hover {
-      background: var(--primary);
-      color: #000;
-      box-shadow: var(--glow);
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #00ff00;
+      margin-right: 8px;
+      box-shadow: 0 0 10px #00ff00;
     }
 
     .chat-box {
@@ -206,6 +204,30 @@
       box-shadow: var(--glow);
     }
 
+    .auto-save-status {
+      padding: 10px 15px;
+      background: var(--bg-light);
+      border-top: 1px solid #ffffff15;
+      font-size: 0.9rem;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .save-indicator {
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+    }
+
+    .save-indicator .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--primary);
+      margin-right: 8px;
+      box-shadow: 0 0 5px var(--primary);
+    }
+
     /* Animations */
     @keyframes fadeIn {
       from {
@@ -224,36 +246,6 @@
       100% { box-shadow: 0 0 0 0 rgba(0, 255, 204, 0); }
     }
 
-    /* Light Theme */
-    .light-theme {
-      --primary: #ff3e80;
-      --secondary: #2979ff;
-      --bg-dark: #f5f5f5;
-      --bg-medium: #ffffff;
-      --bg-light: #f0f0f0;
-      --text: #333;
-    }
-
-    /* Cyber Theme */
-    .cyber-theme {
-      --primary: #00ffcc;
-      --secondary: #ff00aa;
-      --bg-dark: #0a0a0a;
-      --bg-medium: #111;
-      --bg-light: #1a1a1a;
-      --text: #f0f0f0;
-    }
-
-    /* Terminal Theme */
-    .terminal-theme {
-      --primary: #39ff14;
-      --secondary: #ff073a;
-      --bg-dark: #000;
-      --bg-medium: #0a0a0a;
-      --bg-light: #111;
-      --text: #39ff14;
-    }
-
     /* Responsive Design */
     @media (max-width: 600px) {
       .chat-container {
@@ -266,22 +258,33 @@
         padding: 15px;
       }
       
+      .logo {
+        font-size: 1.2rem;
+      }
+      
       .message {
         max-width: 90%;
+      }
+      
+      .json-controls {
+        flex-direction: column;
       }
     }
   </style>
 </head>
-<body class="cyber-theme">
+<body>
   <div class="chat-container">
     <div class="chat-header">
-      <div class="logo">CYBERCHAT v2.0</div>
-      <button class="theme-switcher">THEME</button>
+      <div class="logo">CYBERCHAT v3.0</div>
+      <div class="status-indicator">
+        <div class="status-dot"></div>
+        <span>ONLINE</span>
+      </div>
     </div>
     
     <div class="chat-box" id="chat-box">
       <div class="message bot-message">
-        Welcome to CyberChat! Your messages are stored locally and can be exported to JSON.
+        Welcome to CyberChat! All messages are auto-saved to JSON every 30 seconds.
         <span class="timestamp">System • Just now</span>
       </div>
     </div>
@@ -291,9 +294,18 @@
       <button class="send-button" id="send-btn">➤</button>
     </div>
     
+    <div class="auto-save-status">
+      <div class="save-indicator">
+        <div class="dot"></div>
+        <span id="save-status">Auto-saving to chat.json...</span>
+      </div>
+      <div id="last-save">Last save: Just now</div>
+    </div>
+    
     <div class="json-controls">
       <button class="json-btn" id="export-btn">EXPORT CHAT</button>
       <button class="json-btn" id="import-btn">IMPORT CHAT</button>
+      <button class="json-btn" id="view-btn">VIEW JSON</button>
       <input type="file" id="import-file" accept=".json" style="display: none;">
     </div>
   </div>
@@ -305,19 +317,22 @@
     const sendBtn = document.getElementById('send-btn');
     const exportBtn = document.getElementById('export-btn');
     const importBtn = document.getElementById('import-btn');
+    const viewBtn = document.getElementById('view-btn');
     const importFile = document.getElementById('import-file');
-    const themeSwitcher = document.querySelector('.theme-switcher');
+    const saveStatus = document.getElementById('save-status');
+    const lastSave = document.getElementById('last-save');
 
     // Chat data
     let messages = [];
-    let currentTheme = 'cyber-theme';
-    const themes = ['cyber-theme', 'light-theme', 'terminal-theme'];
+    let autoSaveInterval;
+    let lastSaveTime = new Date();
 
     // Initialize chat
     function initChat() {
       loadChatData();
       renderMessages();
       setupEventListeners();
+      startAutoSave();
     }
 
     // Load chat data from localStorage
@@ -327,22 +342,65 @@
         try {
           const parsedData = JSON.parse(savedData);
           messages = parsedData.messages || [];
-          currentTheme = parsedData.theme || currentTheme;
-          document.body.className = currentTheme;
+          
+          // Show confirmation
+          const confirmation = document.createElement('div');
+          confirmation.classList.add('message', 'bot-message');
+          confirmation.innerHTML = `Chat history loaded! ${messages.length} messages restored<span class="timestamp">System • Just now</span>`;
+          chatBox.appendChild(confirmation);
         } catch (e) {
           console.error('Error loading chat data:', e);
         }
       }
+      
+      // Update last save time display
+      updateLastSaveDisplay();
     }
 
-    // Save chat data to localStorage
+    // Save chat data to localStorage and auto-save to JSON
     function saveChatData() {
       const chatData = {
         messages,
-        theme: currentTheme,
         lastUpdated: new Date().toISOString()
       };
+      
+      // Save to localStorage
       localStorage.setItem('chatData', JSON.stringify(chatData));
+      
+      // Auto-save to JSON blob
+      autoSaveToJson(chatData);
+      
+      // Update last save time
+      lastSaveTime = new Date();
+      updateLastSaveDisplay();
+    }
+
+    // Auto-save chat data to JSON blob
+    function autoSaveToJson(chatData) {
+      const dataStr = JSON.stringify(chatData, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      
+      // Create a URL for the blob
+      const url = URL.createObjectURL(blob);
+      
+      // Store in localStorage for later retrieval
+      localStorage.setItem('chatJsonUrl', url);
+      localStorage.setItem('chatJsonFilename', `chat-${new Date().toISOString().slice(0, 10)}.json`);
+      
+      return url;
+    }
+
+    // Update last save time display
+    function updateLastSaveDisplay() {
+      const now = new Date();
+      const diffSeconds = Math.floor((now - lastSaveTime) / 1000);
+      
+      if (diffSeconds < 60) {
+        lastSave.textContent = `Last save: ${diffSeconds} seconds ago`;
+      } else {
+        const diffMinutes = Math.floor(diffSeconds / 60);
+        lastSave.textContent = `Last save: ${diffMinutes} minutes ago`;
+      }
     }
 
     // Render all messages
@@ -351,6 +409,9 @@
       messages.forEach(msg => {
         addMessageToUI(msg.text, msg.sender, msg.timestamp);
       });
+      
+      // Scroll to bottom
+      chatBox.scrollTop = chatBox.scrollHeight;
     }
 
     // Add a message to the UI
@@ -396,12 +457,12 @@
     // Send bot response
     function sendBotResponse() {
       const responses = [
-        "I'm processing your message...",
-        "That's interesting!",
-        "I've recorded that in the system.",
-        "Thanks for sharing!",
-        "Cyber systems are analyzing your input...",
-        "Message received and stored securely."
+        "I've saved your message to chat.json!",
+        "Your message is securely stored.",
+        "Data saved successfully.",
+        "Message recorded in the system.",
+        "Cyber systems are processing your input...",
+        "Your data is now in the JSON archive."
       ];
       
       const response = responses[Math.floor(Math.random() * responses.length)];
@@ -429,7 +490,7 @@
       const dataStr = JSON.stringify(chatData, null, 2);
       const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
       
-      const exportFileDefaultName = `chat-${new Date().toISOString().slice(0, 10)}.json`;
+      const exportFileDefaultName = `chat-export-${new Date().toISOString().slice(0, 10)}.json`;
       
       const linkElement = document.createElement('a');
       linkElement.setAttribute('href', dataUri);
@@ -442,6 +503,20 @@
       confirmation.innerHTML = `Chat exported successfully!<span class="timestamp">System • Just now</span>`;
       chatBox.appendChild(confirmation);
       chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // View JSON data
+    function viewJson() {
+      const chatData = {
+        messages,
+        meta: {
+          lastSaved: new Date().toISOString(),
+          messageCount: messages.length
+        }
+      };
+      
+      const jsonStr = JSON.stringify(chatData, null, 2);
+      alert(`Current Chat JSON:\n\n${jsonStr}`);
     }
 
     // Import chat from JSON
@@ -480,19 +555,22 @@
       e.target.value = ''; // Reset input
     }
 
-    // Switch theme
-    function switchTheme() {
-      const currentIndex = themes.indexOf(currentTheme);
-      const nextIndex = (currentIndex + 1) % themes.length;
-      currentTheme = themes[nextIndex];
-      document.body.className = currentTheme;
+    // Start auto-save interval
+    function startAutoSave() {
+      // Initial save
       saveChatData();
       
-      // Add animation effect
-      themeSwitcher.style.animation = 'pulse 0.5s';
-      setTimeout(() => {
-        themeSwitcher.style.animation = '';
-      }, 500);
+      // Set up periodic saving
+      autoSaveInterval = setInterval(() => {
+        saveStatus.textContent = "Auto-saving to chat.json...";
+        saveChatData();
+        
+        // Animation effect
+        saveStatus.style.color = "#00ffcc";
+        setTimeout(() => {
+          saveStatus.style.color = "";
+        }, 1000);
+      }, 30000); // Save every 30 seconds
     }
 
     // Set up event listeners
@@ -504,8 +582,8 @@
       
       exportBtn.addEventListener('click', exportChat);
       importBtn.addEventListener('click', importChat);
+      viewBtn.addEventListener('click', viewJson);
       importFile.addEventListener('change', handleFileSelect);
-      themeSwitcher.addEventListener('click', switchTheme);
     }
 
     // Initialize the chat when page loads
