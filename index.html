@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CyberChat Advanced</title>
+  <title>CyberChat | Server-Sync Edition</title>
   <style>
     :root {
       --primary: #00ffcc;
@@ -116,12 +116,13 @@
       border-bottom-right-radius: 5px;
     }
 
-    .bot-message {
-      align-self: flex-start;
+    .system-message {
+      align-self: center;
       background: var(--bg-light);
       color: var(--text);
       border: 1px solid #ffffff22;
-      border-bottom-left-radius: 5px;
+      text-align: center;
+      max-width: 100%;
     }
 
     .timestamp {
@@ -204,7 +205,7 @@
       box-shadow: var(--glow);
     }
 
-    .auto-save-status {
+    .server-status {
       padding: 10px 15px;
       background: var(--bg-light);
       border-top: 1px solid #ffffff15;
@@ -275,16 +276,16 @@
 <body>
   <div class="chat-container">
     <div class="chat-header">
-      <div class="logo">CYBERCHAT v3.0</div>
+      <div class="logo">CYBERCHAT SERVER SYNC</div>
       <div class="status-indicator">
         <div class="status-dot"></div>
-        <span>ONLINE</span>
+        <span id="connection-status">CONNECTING...</span>
       </div>
     </div>
     
     <div class="chat-box" id="chat-box">
-      <div class="message bot-message">
-        Welcome to CyberChat! All messages are auto-saved to JSON every 30 seconds.
+      <div class="message system-message">
+        Connecting to server... Saving every message to server JSON file
         <span class="timestamp">System • Just now</span>
       </div>
     </div>
@@ -294,19 +295,17 @@
       <button class="send-button" id="send-btn">➤</button>
     </div>
     
-    <div class="auto-save-status">
+    <div class="server-status">
       <div class="save-indicator">
         <div class="dot"></div>
-        <span id="save-status">Auto-saving to chat.json...</span>
+        <span id="save-status">Server Status: Connecting...</span>
       </div>
-      <div id="last-save">Last save: Just now</div>
+      <div id="last-save">Server: localhost:3000</div>
     </div>
     
     <div class="json-controls">
       <button class="json-btn" id="export-btn">EXPORT CHAT</button>
-      <button class="json-btn" id="import-btn">IMPORT CHAT</button>
-      <button class="json-btn" id="view-btn">VIEW JSON</button>
-      <input type="file" id="import-file" accept=".json" style="display: none;">
+      <button class="json-btn" id="view-btn">VIEW SERVER JSON</button>
     </div>
   </div>
 
@@ -316,119 +315,137 @@
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
     const exportBtn = document.getElementById('export-btn');
-    const importBtn = document.getElementById('import-btn');
     const viewBtn = document.getElementById('view-btn');
-    const importFile = document.getElementById('import-file');
     const saveStatus = document.getElementById('save-status');
     const lastSave = document.getElementById('last-save');
+    const connectionStatus = document.getElementById('connection-status');
 
-    // Chat data
-    let messages = [];
-    let autoSaveInterval;
-    let lastSaveTime = new Date();
-
+    // Server configuration
+    const SERVER_URL = 'http://localhost:3000';
+    let socket;
+    let username = `User${Math.floor(Math.random() * 10000)}`;
+    
     // Initialize chat
-    function initChat() {
-      loadChatData();
-      renderMessages();
+    async function initChat() {
       setupEventListeners();
-      startAutoSave();
+      connectToServer();
+      loadUsername();
     }
 
-    // Load chat data from localStorage
-    function loadChatData() {
-      const savedData = localStorage.getItem('chatData');
-      if (savedData) {
-        try {
-          const parsedData = JSON.parse(savedData);
-          messages = parsedData.messages || [];
+    // Connect to WebSocket server
+    function connectToServer() {
+      updateStatus("Connecting to server...", "#ffcc00");
+      
+      try {
+        socket = new WebSocket(`ws://localhost:3000`);
+        
+        socket.addEventListener('open', () => {
+          updateStatus("Connected to server", "#00ff00");
+          connectionStatus.textContent = "CONNECTED";
+          fetchChatHistory();
+        });
+        
+        socket.addEventListener('message', (event) => {
+          const data = JSON.parse(event.data);
           
-          // Show confirmation
-          const confirmation = document.createElement('div');
-          confirmation.classList.add('message', 'bot-message');
-          confirmation.innerHTML = `Chat history loaded! ${messages.length} messages restored<span class="timestamp">System • Just now</span>`;
-          chatBox.appendChild(confirmation);
-        } catch (e) {
-          console.error('Error loading chat data:', e);
-        }
+          if (data.type === 'chat-history') {
+            renderChatHistory(data.messages);
+          } else if (data.type === 'new-message') {
+            addMessageToUI(data.message.text, data.message.sender, data.message.timestamp);
+          } else if (data.type === 'server-update') {
+            showSystemMessage(data.message);
+          }
+        });
+        
+        socket.addEventListener('close', () => {
+          updateStatus("Server disconnected. Reconnecting...", "#ff5555");
+          connectionStatus.textContent = "DISCONNECTED";
+          setTimeout(connectToServer, 3000);
+        });
+        
+        socket.addEventListener('error', (error) => {
+          updateStatus("Connection error: " + error.message, "#ff5555");
+          connectionStatus.textContent = "ERROR";
+        });
+        
+      } catch (error) {
+        updateStatus("WebSocket error: " + error.message, "#ff5555");
+        connectionStatus.textContent = "ERROR";
+        setTimeout(connectToServer, 5000);
       }
-      
-      // Update last save time display
-      updateLastSaveDisplay();
     }
-
-    // Save chat data to localStorage and auto-save to JSON
-    function saveChatData() {
-      const chatData = {
-        messages,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      // Save to localStorage
-      localStorage.setItem('chatData', JSON.stringify(chatData));
-      
-      // Auto-save to JSON blob
-      autoSaveToJson(chatData);
-      
-      // Update last save time
-      lastSaveTime = new Date();
-      updateLastSaveDisplay();
+    
+    // Update status display
+    function updateStatus(text, color) {
+      saveStatus.textContent = text;
+      saveStatus.style.color = color;
     }
-
-    // Auto-save chat data to JSON blob
-    function autoSaveToJson(chatData) {
-      const dataStr = JSON.stringify(chatData, null, 2);
-      const blob = new Blob([dataStr], { type: 'application/json' });
-      
-      // Create a URL for the blob
-      const url = URL.createObjectURL(blob);
-      
-      // Store in localStorage for later retrieval
-      localStorage.setItem('chatJsonUrl', url);
-      localStorage.setItem('chatJsonFilename', `chat-${new Date().toISOString().slice(0, 10)}.json`);
-      
-      return url;
-    }
-
-    // Update last save time display
-    function updateLastSaveDisplay() {
-      const now = new Date();
-      const diffSeconds = Math.floor((now - lastSaveTime) / 1000);
-      
-      if (diffSeconds < 60) {
-        lastSave.textContent = `Last save: ${diffSeconds} seconds ago`;
+    
+    // Load username from localStorage or generate
+    function loadUsername() {
+      const savedUsername = localStorage.getItem('chatUsername');
+      if (savedUsername) {
+        username = savedUsername;
       } else {
-        const diffMinutes = Math.floor(diffSeconds / 60);
-        lastSave.textContent = `Last save: ${diffMinutes} minutes ago`;
+        localStorage.setItem('chatUsername', username);
       }
     }
-
-    // Render all messages
-    function renderMessages() {
+    
+    // Fetch chat history from server
+    function fetchChatHistory() {
+      fetch(`${SERVER_URL}/messages`)
+        .then(response => response.json())
+        .then(data => {
+          renderChatHistory(data);
+        })
+        .catch(error => {
+          console.error('Error fetching chat history:', error);
+          showSystemMessage('Failed to load chat history from server');
+        });
+    }
+    
+    // Render chat history
+    function renderChatHistory(messages) {
       chatBox.innerHTML = '';
+      
+      if (messages.length === 0) {
+        showSystemMessage('No messages in history. Start chatting!');
+        return;
+      }
+      
       messages.forEach(msg => {
         addMessageToUI(msg.text, msg.sender, msg.timestamp);
       });
       
-      // Scroll to bottom
-      chatBox.scrollTop = chatBox.scrollHeight;
+      showSystemMessage(`Loaded ${messages.length} messages from server`);
     }
-
+    
     // Add a message to the UI
     function addMessageToUI(text, sender, timestamp) {
       const messageEl = document.createElement('div');
-      messageEl.classList.add('message', `${sender}-message`);
+      
+      if (sender === 'system') {
+        messageEl.classList.add('message', 'system-message');
+      } else {
+        messageEl.classList.add('message', `${sender === username ? 'user' : 'other'}-message`);
+      }
       
       const time = new Date(timestamp);
       const timeString = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const displayName = sender === username ? 'You' : (sender === 'system' ? 'System' : sender);
       
       messageEl.innerHTML = `
         ${text}
-        <span class="timestamp">${sender === 'user' ? 'You' : 'System'} • ${timeString}</span>
+        <span class="timestamp">${displayName} • ${timeString}</span>
       `;
       
       chatBox.appendChild(messageEl);
       chatBox.scrollTop = chatBox.scrollHeight;
+    }
+    
+    // Show system message
+    function showSystemMessage(text) {
+      addMessageToUI(text, 'system', new Date().toISOString());
     }
 
     // Send a new message
@@ -438,139 +455,79 @@
       
       const newMessage = {
         text,
-        sender: 'user',
+        sender: username,
         timestamp: new Date().toISOString()
       };
       
-      messages.push(newMessage);
-      addMessageToUI(text, 'user', newMessage.timestamp);
-      saveChatData();
+      // Send via WebSocket
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'new-message',
+          message: newMessage
+        }));
+        
+        // Add to UI immediately for better UX
+        addMessageToUI(text, username, newMessage.timestamp);
+      } else {
+        showSystemMessage("Not connected to server. Message not sent.");
+      }
       
       // Clear input
       messageInput.value = '';
       messageInput.focus();
-      
-      // Simulate bot response
-      setTimeout(sendBotResponse, 1000);
-    }
-
-    // Send bot response
-    function sendBotResponse() {
-      const responses = [
-        "I've saved your message to chat.json!",
-        "Your message is securely stored.",
-        "Data saved successfully.",
-        "Message recorded in the system.",
-        "Cyber systems are processing your input...",
-        "Your data is now in the JSON archive."
-      ];
-      
-      const response = responses[Math.floor(Math.random() * responses.length)];
-      const botMessage = {
-        text: response,
-        sender: 'bot',
-        timestamp: new Date().toISOString()
-      };
-      
-      messages.push(botMessage);
-      addMessageToUI(response, 'bot', botMessage.timestamp);
-      saveChatData();
     }
 
     // Export chat to JSON
     function exportChat() {
-      const chatData = {
-        messages,
-        meta: {
-          exportedAt: new Date().toISOString(),
-          messageCount: messages.length
-        }
-      };
-      
-      const dataStr = JSON.stringify(chatData, null, 2);
-      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-      
-      const exportFileDefaultName = `chat-export-${new Date().toISOString().slice(0, 10)}.json`;
-      
-      const linkElement = document.createElement('a');
-      linkElement.setAttribute('href', dataUri);
-      linkElement.setAttribute('download', exportFileDefaultName);
-      linkElement.click();
-      
-      // Show confirmation
-      const confirmation = document.createElement('div');
-      confirmation.classList.add('message', 'bot-message');
-      confirmation.innerHTML = `Chat exported successfully!<span class="timestamp">System • Just now</span>`;
-      chatBox.appendChild(confirmation);
-      chatBox.scrollTop = chatBox.scrollHeight;
+      fetch(`${SERVER_URL}/messages`)
+        .then(response => response.json())
+        .then(messages => {
+          const chatData = {
+            messages,
+            meta: {
+              exportedAt: new Date().toISOString(),
+              messageCount: messages.length
+            }
+          };
+          
+          const dataStr = JSON.stringify(chatData, null, 2);
+          const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+          
+          const exportFileDefaultName = `chat-export-${new Date().toISOString().slice(0, 10)}.json`;
+          
+          const linkElement = document.createElement('a');
+          linkElement.setAttribute('href', dataUri);
+          linkElement.setAttribute('download', exportFileDefaultName);
+          linkElement.click();
+          
+          showSystemMessage("Chat exported successfully!");
+        })
+        .catch(error => {
+          console.error('Error exporting chat:', error);
+          showSystemMessage("Failed to export chat");
+        });
     }
 
     // View JSON data
     function viewJson() {
-      const chatData = {
-        messages,
-        meta: {
-          lastSaved: new Date().toISOString(),
-          messageCount: messages.length
-        }
-      };
-      
-      const jsonStr = JSON.stringify(chatData, null, 2);
-      alert(`Current Chat JSON:\n\n${jsonStr}`);
-    }
-
-    // Import chat from JSON
-    function importChat() {
-      importFile.click();
-    }
-
-    // Handle file selection for import
-    function handleFileSelect(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      const reader = new FileReader();
-      reader.onload = function(event) {
-        try {
-          const importedData = JSON.parse(event.target.result);
-          if (importedData.messages && Array.isArray(importedData.messages)) {
-            messages = importedData.messages;
-            saveChatData();
-            renderMessages();
-            
-            // Show confirmation
-            const confirmation = document.createElement('div');
-            confirmation.classList.add('message', 'bot-message');
-            confirmation.innerHTML = `Chat imported successfully! Loaded ${messages.length} messages.<span class="timestamp">System • Just now</span>`;
-            chatBox.appendChild(confirmation);
-            chatBox.scrollTop = chatBox.scrollHeight;
-          } else {
-            throw new Error('Invalid chat file format');
-          }
-        } catch (error) {
-          alert('Error importing chat: ' + error.message);
-        }
-      };
-      reader.readAsText(file);
-      e.target.value = ''; // Reset input
-    }
-
-    // Start auto-save interval
-    function startAutoSave() {
-      // Initial save
-      saveChatData();
-      
-      // Set up periodic saving
-      autoSaveInterval = setInterval(() => {
-        saveStatus.textContent = "Auto-saving to chat.json...";
-        saveChatData();
-        
-        // Animation effect
-        saveStatus.style.color = "#00ffcc";
-        setTimeout(() => {
-          saveStatus.style.color = "";
-        }, 1000);
-      }, 30000); // Save every 30 seconds
+      fetch(`${SERVER_URL}/messages`)
+        .then(response => response.json())
+        .then(messages => {
+          const chatData = {
+            messages,
+            meta: {
+              lastSaved: new Date().toISOString(),
+              messageCount: messages.length
+            }
+          };
+          
+          const jsonStr = JSON.stringify(chatData, null, 2);
+          alert(`Server Chat JSON:\n\n${jsonStr}`);
+        })
+        .catch(error => {
+          console.error('Error fetching JSON:', error);
+          showSystemMessage("Failed to retrieve server JSON");
+        });
     }
 
     // Set up event listeners
@@ -581,9 +538,7 @@
       });
       
       exportBtn.addEventListener('click', exportChat);
-      importBtn.addEventListener('click', importChat);
       viewBtn.addEventListener('click', viewJson);
-      importFile.addEventListener('change', handleFileSelect);
     }
 
     // Initialize the chat when page loads
